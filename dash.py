@@ -1,0 +1,239 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import plotly.express as px
+from scipy.signal import butter, filtfilt
+from scipy.stats import f_oneway
+from statsmodels.tsa.seasonal import seasonal_decompose
+from datetime import datetime, timedelta
+import base64
+import os
+import statsmodels.api as sm
+
+
+# -------------------------------
+# Load 3D mouse model from disk
+# -------------------------------
+def load_mouse_model_base64():
+    model_path = "C:/Users/konra/OneDrive/Desktop/Axiome/voxel_mouse.glb"
+    if os.path.exists(model_path):
+        with open(model_path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    return None
+
+# -------------------------------
+# Generate HTML for model-viewer
+# -------------------------------
+def get_model_viewer_html():
+    model_data = load_mouse_model_base64()
+    if model_data:
+        src = f"data:application/octet-stream;base64,{model_data}"
+    else:
+        src = "https://modelviewer.dev/shared-assets/models/Astronaut.glb"
+
+    return f"""
+        <model-viewer src="{src}" alt="3D Maus" auto-rotate camera-controls
+            style="width: 100%; height: 400px; background-color: #f0f0f0;"
+            exposure="1" shadow-intensity="1">
+        </model-viewer>
+        <script type="module"
+            src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js">
+        </script>
+    """
+
+# -------------------------------
+# Simulate data (60 seconds)
+# -------------------------------
+@st.cache_data
+def generate_data():
+    np.random.seed(42)
+    mice = ["M001", "M002", "M003"]
+    seconds = list(range(1, 61))
+    tissues = ["Leber", "Niere"]
+    dose_levels = [1.0, 1.5, 2.0]
+
+    rows = []
+    for i, mouse in enumerate(mice):
+        for sec in seconds:
+            for tissue in tissues:
+                dose = dose_levels[i]
+                base = 0.4 + 0.2 * np.sin(sec / 10.0 + i)
+                jod = np.round(np.clip(np.random.normal(loc=base, scale=0.05), 0.05, 0.8), 3)
+                timestamp = datetime(2023, 1, 1) + timedelta(seconds=sec)
+                rows.append([mouse, sec, tissue, dose, jod, timestamp])
+
+    return pd.DataFrame(rows, columns=["TierID", "Time", "Gewebe", "Dosis", "Jod", "Timestamp"])
+
+# -------------------------------
+# Data cleaning functions
+# -------------------------------
+def apply_bandpass(df):
+    b, a = butter(2, [0.1, 0.49], btype="bandpass", fs=1.0)
+    def filter_group(group):
+        jod = group["Jod"].values
+        if len(jod) < 3:
+            group["Jod"] = np.nan
+        else:
+            try:
+                group["Jod"] = filtfilt(b, a, jod)
+            except:
+                group["Jod"] = np.nan
+        return group
+    return df.groupby(["TierID", "Gewebe"], group_keys=False).apply(filter_group)
+
+def remove_outliers(df):
+    q1 = df["Jod"].quantile(0.25)
+    q3 = df["Jod"].quantile(0.75)
+    iqr = q3 - q1
+    return df[(df["Jod"] >= q1 - 1.5 * iqr) & (df["Jod"] <= q3 + 1.5 * iqr)]
+
+def impute_missing(df):
+    return df.groupby(["TierID", "Gewebe"])["Jod"].transform(lambda x: x.fillna(x.mean()))
+
+# -------------------------------
+# Inference functions
+# -------------------------------
+def run_anova(df):
+    grouped = df.groupby("Gewebe")["Jod"].apply(list)
+    return f_oneway(*grouped)
+
+def decompose_time_series(df):
+    result = {}
+    try:
+        series = df[df["Gewebe"] == "Leber"].sort_values("Timestamp")["Jod"]
+        series.index = pd.to_datetime(df[df["Gewebe"] == "Leber"].sort_values("Timestamp")["Timestamp"])
+        decomposition = seasonal_decompose(series, model='additive', period=10)
+        result = {
+            "trend": decomposition.trend,
+            "seasonal": decomposition.seasonal,
+            "resid": decomposition.resid
+        }
+    except Exception as e:
+        st.error(f"Time series decomposition failed: {e}")
+    return result
+
+# -------------------------------
+# Forecasting function
+# -------------------------------
+
+def forecast_model(df, features, model_type, forecast_horizon):
+    df = df.copy()
+    df = pd.get_dummies(df, columns=["Gewebe", "TierID"], drop_first=True)
+    df = df.dropna()
+
+    X = df[features]
+    X = sm.add_constant(X)  # Add intercept term
+    y = df["Jod"]
+
+    # Split data (80% train, 20% test)
+    split_idx = int(len(X) * 0.8)
+    X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
+    y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
+
+    if model_type == "Linear Regression":
+        model = sm.OLS(y_train, X_train).fit()
+    else:
+        st.warning("Nur Lineare Regression wird aktuell unterstützt (kein Random Forest).")
+        model = sm.OLS(y_train, X_train).fit()
+
+    y_pred = model.predict(X_test)
+    rmse = np.sqrt(np.mean((y_test - y_pred) ** 2))
+
+    forecast_input = sm.add_constant(X.tail(forecast_horizon))
+    forecast_values = model.predict(forecast_input)
+
+    result_df = df.tail(forecast_horizon).copy()
+    result_df["Forecast"] = forecast_values
+
+    # Fix Arrow compatibility
+    result_df["TierID"] = result_df["TierID"].astype(str)
+    result_df["Gewebe"] = result_df["Gewebe"].astype(str)
+
+    return result_df, rmse
+
+
+
+# -------------------------------
+# Streamlit layout
+# -------------------------------
+st.set_page_config(layout="wide", page_title="XFI 3D Mouse Dashboard")
+st.title("🧪 XFI Jodverteilung + 🐭 3D Mausmodell")
+st.components.v1.html(get_model_viewer_html(), height=420)
+
+# Load data
+df = generate_data()
+df["TierID"] = df["TierID"].astype(str)
+df["Gewebe"] = df["Gewebe"].astype(str)
+
+# Sidebar controls
+st.sidebar.header("⚙️ Datenoptionen")
+clean_method = st.sidebar.selectbox("Datenbereinigung", ["Keine", "Bandpass-Filter", "Ausreißer entfernen", "Imputation"])
+update_timestamps = st.sidebar.checkbox("Timestamps auf Jetzt aktualisieren")
+apply = st.sidebar.button("Anwenden")
+
+if apply:
+    if update_timestamps:
+        df["Timestamp"] = datetime.now() + pd.to_timedelta(df["Time"], unit="s")
+    if clean_method == "Bandpass-Filter":
+        df = apply_bandpass(df)
+    elif clean_method == "Ausreißer entfernen":
+        df = remove_outliers(df)
+    elif clean_method == "Imputation":
+        df["Jod"] = impute_missing(df)
+    st.session_state["df"] = df
+else:
+    if "df" not in st.session_state:
+        st.session_state["df"] = df
+
+df = st.session_state["df"]
+
+# Tabs
+tab_titles = ["📄 Rohdaten", "📊 Statistik", "📈 Visualisierung", "📉 Forecast"]
+tabs = st.tabs(tab_titles)
+
+for i, tab in enumerate(tabs):
+    with tab:
+        if i == 0:
+            st.subheader("Rohdaten")
+            df["TierID"] = df["TierID"].astype(str)
+            st.dataframe(df)
+
+        elif i == 1:
+            st.subheader("Deskriptive Statistik")
+            st.write(df.describe(include="all"))
+
+            st.subheader("Inferenzstatistik")
+            anova_result = run_anova(df)
+            st.write("**ANOVA p-Wert (Gewebe):**", round(anova_result.pvalue, 5))
+
+            decomposition = decompose_time_series(df)
+            if decomposition:
+                st.line_chart(decomposition["trend"], height=200, use_container_width=True)
+                st.line_chart(decomposition["seasonal"], height=200, use_container_width=True)
+
+        elif i == 2:
+            st.subheader("Histogramm der Jodverteilung")
+            fig_hist = px.histogram(df, x="Jod", color="Gewebe", barmode="overlay", nbins=10)
+            st.plotly_chart(fig_hist, use_container_width=True)
+
+            st.subheader("Boxplot der Jodverteilung")
+            fig_box = px.box(df, x="Gewebe", y="Jod", color="Gewebe", points="all")
+            st.plotly_chart(fig_box, use_container_width=True)
+
+            st.subheader("Jodverteilung über Zeit")
+            fig_ts = px.line(df, x="Time", y="Jod", color="Gewebe", markers=True, facet_col="TierID",
+                             labels={"Time": "Sekunden", "Jod": "Jod"})
+            st.plotly_chart(fig_ts, use_container_width=True)
+
+        elif i == 3:
+            st.subheader("ML Forecast der Jodkonzentration")
+            all_features = [col for col in df.columns if col not in ["Jod", "Timestamp"] and df[col].dtype in [np.number, np.int64, np.float64]]
+            selected_features = st.multiselect("Features für das Modell", all_features, default=["Time", "Dosis"])
+            model_choice = st.selectbox("Modell wählen", ["Linear Regression", "Random Forest"])
+            forecast_horizon = st.slider("Vorhersage-Horizont (letzte N Werte)", 1, 20, 5)
+
+            if st.button("Vorhersage starten"):
+                forecast_df, rmse = forecast_model(df, selected_features, model_choice, forecast_horizon)
+                st.write(f"RMSE: {rmse:.4f}")
+                st.dataframe(forecast_df[["Timestamp", "Jod", "Forecast"]])
+                st.line_chart(forecast_df.set_index("Timestamp")[["Jod", "Forecast"]])

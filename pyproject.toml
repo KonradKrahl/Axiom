@@ -1,0 +1,15 @@
+[project]
+name = "axiome"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "numpy>=2.3.2",
+    "pandas>=2.3.1",
+    "plotly>=6.2.0",
+    "scipy>=1.16.1",
+    "statsmodels>=0.14.5",
+    "streamlit>=1.47.1",
+    "trimesh>=4.7.1",
+]
