@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 import base64
 import os
 import statsmodels.api as sm
+from sklearn.cluster import KMeans
 
 
 # -------------------------------
@@ -32,14 +33,15 @@ def get_model_viewer_html():
         src = "https://modelviewer.dev/shared-assets/models/Astronaut.glb"
 
     return f"""
-        <model-viewer src="{src}" alt="3D Maus" auto-rotate camera-controls
+        <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+        <model-viewer src="{src}" alt="3D Maus"
             style="width: 100%; height: 400px; background-color: #f0f0f0;"
-            exposure="1" shadow-intensity="1">
+            auto-rotate auto-rotate-delay="0" rotation-per-second="30deg"
+            camera-controls exposure="1" shadow-intensity="1"
+            camera-orbit="45deg 90deg 2m">
         </model-viewer>
-        <script type="module"
-            src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js">
-        </script>
     """
+
 
 # -------------------------------
 # Simulate data (60 seconds)
@@ -63,6 +65,38 @@ def generate_data():
                 rows.append([mouse, sec, tissue, dose, jod, timestamp])
 
     return pd.DataFrame(rows, columns=["TierID", "Time", "Gewebe", "Dosis", "Jod", "Timestamp"])
+
+
+# -------------------------------
+# k-means
+# -------------------------------
+
+def classify_jod_levels(df, n_clusters=3):
+    df = df.copy()
+    valid = df["Jod"].notna()
+    
+    # Reshape required by KMeans
+    jod_values = df.loc[valid, "Jod"].values.reshape(-1, 1)
+    
+    # Fit KMeans
+    kmeans = KMeans(n_clusters=n_clusters, n_init=10, random_state=42)
+    clusters = kmeans.fit_predict(jod_values)
+
+    # Order clusters by mean Jod
+    means = kmeans.cluster_centers_.flatten()
+    sorted_indices = np.argsort(means)
+    label_map = {sorted_indices[0]: "Low", sorted_indices[1]: "Medium", sorted_indices[2]: "High"}
+    
+    # Apply mapped labels
+    classified = pd.Series(clusters).map(label_map)
+    
+    # Insert into DataFrame
+    df.loc[valid, "Auto_classified"] = classified.values
+    df["Auto_classified"] = df["Auto_classified"].astype("category")
+
+    return df
+
+
 
 # -------------------------------
 # Data cleaning functions
@@ -142,12 +176,18 @@ def forecast_model(df, features, model_type, forecast_horizon):
     forecast_input = sm.add_constant(X.tail(forecast_horizon))
     forecast_values = model.predict(forecast_input)
 
-    result_df = df.tail(forecast_horizon).copy()
+    # Get last rows from original DataFrame before one-hot encoding
+    original_tail = df.tail(forecast_horizon).copy()
+
+    # Prepare result
+    result_df = original_tail.copy()
     result_df["Forecast"] = forecast_values
 
-    # Fix Arrow compatibility
-    result_df["TierID"] = result_df["TierID"].astype(str)
-    result_df["Gewebe"] = result_df["Gewebe"].astype(str)
+    # Ensure required columns are present
+    if "TierID" in result_df.columns:
+        result_df["TierID"] = result_df["TierID"].astype(str)
+    if "Gewebe" in result_df.columns:
+        result_df["Gewebe"] = result_df["Gewebe"].astype(str)
 
     return result_df, rmse
 
@@ -157,7 +197,7 @@ def forecast_model(df, features, model_type, forecast_horizon):
 # Streamlit layout
 # -------------------------------
 st.set_page_config(layout="wide", page_title="XFI 3D Mouse Dashboard")
-st.title("🧪 XFI Jodverteilung + 🐭 3D Mausmodell")
+st.title("XFI Jodverteilung am 3D Mausmodell")
 st.components.v1.html(get_model_viewer_html(), height=420)
 
 # Load data
@@ -186,6 +226,7 @@ else:
         st.session_state["df"] = df
 
 df = st.session_state["df"]
+df = classify_jod_levels(df)
 
 # Tabs
 tab_titles = ["📄 Rohdaten", "📊 Statistik", "📈 Visualisierung", "📉 Forecast"]
@@ -220,9 +261,16 @@ for i, tab in enumerate(tabs):
             fig_box = px.box(df, x="Gewebe", y="Jod", color="Gewebe", points="all")
             st.plotly_chart(fig_box, use_container_width=True)
 
+            # 🔽 ADD THIS BLOCK HERE
+            st.subheader("Jodklassifikation (automatisch, clusteringbasiert)")
+            fig_class = px.scatter(df, x="Time", y="Jod", color="Auto_classified", facet_col="TierID",
+                                labels={"Auto_classified": "Klassifikation"})
+            st.plotly_chart(fig_class, use_container_width=True)
+            # 🔼 END BLOCK
+
             st.subheader("Jodverteilung über Zeit")
             fig_ts = px.line(df, x="Time", y="Jod", color="Gewebe", markers=True, facet_col="TierID",
-                             labels={"Time": "Sekunden", "Jod": "Jod"})
+                            labels={"Time": "Sekunden", "Jod": "Jod"})
             st.plotly_chart(fig_ts, use_container_width=True)
 
         elif i == 3:
