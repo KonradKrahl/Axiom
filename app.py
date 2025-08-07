@@ -9,7 +9,8 @@ from datetime import datetime, timedelta
 import base64
 import os
 import statsmodels.api as sm
-from sklearn.cluster import KMeans
+import sklearn
+
 
 
 # -------------------------------
@@ -81,7 +82,8 @@ def classify_jod_levels(df, n_clusters=3):
     jod_values = df.loc[valid, "Jod"].values.reshape(-1, 1)
     
     # Fit KMeans
-    kmeans = KMeans(n_clusters=n_clusters, n_init=10, random_state=42)
+
+    kmeans = sklearn.cluster.KMeans(n_clusters=n_clusters, n_init=10, random_state=42)
     clusters = kmeans.fit_predict(jod_values)
 
     # Order clusters by mean Jod
