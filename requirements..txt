@@ -4,4 +4,4 @@ numpy==1.26.4
 plotly==5.22.0
 scipy==1.13.1
 statsmodels==0.14.1
-scikit-learn
+scikit-learn==1.1.2
