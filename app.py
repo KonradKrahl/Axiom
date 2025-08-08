@@ -9,7 +9,36 @@ from datetime import datetime, timedelta
 import base64
 import os
 import statsmodels.api as sm
-from sklearn.cluster import KMeans
+import sklearn
+from streamlit.components.v1 import html
+
+
+
+
+# --- BEFORE ANY UI ---
+st.set_page_config(layout="wide", page_title="XFI 3D Mouse Dashboard")
+
+# Kill page side padding and force the components iframe to be full width
+st.markdown("""
+<style>
+/* kill page padding and max-width */
+main .block-container { padding-left:0 !important; padding-right:0 !important; max-width: 100% !important; }
+[data-testid="stAppViewContainer"] { padding: 0 !important; }
+
+/* make ANY html component wrapper + iframe full width (covers multiple versions) */
+[data-testid="stHtml"] { width: 100% !important; }
+[data-testid="stIFrame"] { width: 100% !important; }
+[data-testid="stIFrame"] > iframe { width: 100% !important; display:block !important; }
+
+/* fallback classnames for older releases */
+.css-18ni7ap, .css-1d391kg { width: 100% !important; }
+
+/* optional: remove top padding so the viewer hugs the top edge */
+.main .block-container { padding-top: 0 !important; }
+</style>
+""", unsafe_allow_html=True)
+
+
 
 
 # -------------------------------
@@ -27,21 +56,36 @@ def load_mouse_model_base64():
 # -------------------------------
 def get_model_viewer_html():
     model_data = load_mouse_model_base64()
-    if model_data:
-        src = f"data:application/octet-stream;base64,{model_data}"
-    else:
-        src = "https://modelviewer.dev/shared-assets/models/Astronaut.glb"
+    src = f"data:application/octet-stream;base64,{model_data}" if model_data else "https://modelviewer.dev/shared-assets/models/Astronaut.glb"
 
     return f"""
-        <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
-        <model-viewer src="{src}" alt="3D Maus"
-            style="width: 100%; height: 400px; background-color: #f0f0f0;"
-            auto-rotate auto-rotate-delay="0" rotation-per-second="30deg"
-            camera-controls exposure="1" shadow-intensity="1"
-            camera-orbit="45deg 90deg 2m">
-        </model-viewer>
-    """
+      <script>
+        // Force this component's iframe to 100% width (works across Streamlit versions)
+        (function() {{
+          try {{
+            const frame = window.frameElement;
+            if (frame) {{
+              frame.style.width = '100%';
+              if (frame.parentElement) frame.parentElement.style.width = '100%';
+            }}
+          }} catch (e) {{}}
+        }})();
+      </script>
 
+      <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+      <style>
+        html, body, #wrap {{ height: 100%; margin: 0; }}
+        #wrap {{ width: 100%; }}
+        model-viewer {{ width: 100%; height: 100%; background-color: #f0f0f0; }}
+      </style>
+      <div id="wrap">
+        <model-viewer src="{src}" alt="3D Maus"
+          auto-rotate auto-rotate-delay="0" rotation-per-second="30deg"
+          camera-controls exposure="1" shadow-intensity="1"
+          camera-orbit="45deg 90deg 2m">
+        </model-viewer>
+      </div>
+    """
 
 
 
@@ -81,7 +125,8 @@ def classify_jod_levels(df, n_clusters=3):
     jod_values = df.loc[valid, "Jod"].values.reshape(-1, 1)
     
     # Fit KMeans
-    kmeans = KMeans(n_clusters=n_clusters, n_init=10, random_state=42)
+
+    kmeans = sklearn.cluster.KMeans(n_clusters=n_clusters, n_init=10, random_state=42)
     clusters = kmeans.fit_predict(jod_values)
 
     # Order clusters by mean Jod
@@ -185,7 +230,7 @@ def forecast_model(df, features, model_type, forecast_horizon):
     result_df = original_tail.copy()
     result_df["Forecast"] = forecast_values
 
-    # Ensure required columns are present
+    # Ensure required columns are presentf
     if "TierID" in result_df.columns:
         result_df["TierID"] = result_df["TierID"].astype(str)
     if "Gewebe" in result_df.columns:
@@ -198,9 +243,9 @@ def forecast_model(df, features, model_type, forecast_horizon):
 # -------------------------------
 # Streamlit layout
 # -------------------------------
-st.set_page_config(layout="wide", page_title="XFI 3D Mouse Dashboard")
+
 st.title("XFI Jodverteilung am 3D Mausmodell")
-st.components.v1.html(get_model_viewer_html(), height=420)
+html(get_model_viewer_html(), height=420, scrolling=False)
 
 # Load data
 df = generate_data()
