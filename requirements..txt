@@ -1,0 +1,19 @@
+<<<<<<< HEAD:requirements.txt
+streamlit
+pandas
+numpy
+plotly
+scipy
+statsmodels
+scikit-learn
+
+=======
+streamlit==1.35.0
+pandas==2.2.2
+numpy==1.26.4
+plotly==5.22.0
+scipy==1.13.1
+statsmodels==0.14.1
+scikit-learn==1.4.2
+joblib==1.4.2
+>>>>>>> 478f20e6135056cc82468c4990ba604a81800600:requirements..txt
