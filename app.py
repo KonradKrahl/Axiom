@@ -10,7 +10,6 @@ import base64
 import os
 import statsmodels.api as sm
 import sklearn
-<<<<<<< HEAD
 from streamlit.components.v1 import html
 
 
@@ -38,9 +37,6 @@ main .block-container { padding-left:0 !important; padding-right:0 !important; m
 .main .block-container { padding-top: 0 !important; }
 </style>
 """, unsafe_allow_html=True)
-
-=======
->>>>>>> 478f20e6135056cc82468c4990ba604a81800600
 
 
 
