@@ -4,12 +4,12 @@ import numpy as np
 import plotly.express as px
 from scipy.signal import butter, filtfilt
 from scipy.stats import f_oneway
-from scipy.cluster.vq import kmeans2
 from statsmodels.tsa.seasonal import seasonal_decompose
 from datetime import datetime, timedelta
 import base64
 import os
 import statsmodels.api as sm
+from scipy.cluster.vq import kmeans2  # add this
 from streamlit.components.v1 import html
 
 
@@ -116,11 +116,13 @@ def generate_data():
 # k-means
 # -------------------------------
 
+from scipy.cluster.vq import kmeans2
+
 def classify_jod_levels(df, n_clusters=3):
     df = df.copy()
     valid = df["Jod"].notna()
     if not valid.any():
-        df["Auto_classified"] = pd.Categorical([])
+        df["Auto_Cluster_Voxel"] = pd.Categorical([])
         return df
 
     # kmeans2 expects 2D array
@@ -139,9 +141,10 @@ def classify_jod_levels(df, n_clusters=3):
 
     classified = pd.Series(labels).map(label_map).to_numpy()
 
-    df.loc[valid, "Auto_classified"] = classified
-    df["Auto_classified"] = df["Auto_classified"].astype("category")
+    df.loc[valid, "Auto_Cluster_Voxel"] = classified
+    df["Auto_Cluster_Voxel"] = df["Auto_Cluster_Voxel"].astype("category")
     return df
+
 
 
 
@@ -310,8 +313,8 @@ for i, tab in enumerate(tabs):
 
             # 🔽 ADD THIS BLOCK HERE
             st.subheader("Jodklassifikation (automatisch, clusteringbasiert)")
-            fig_class = px.scatter(df, x="Time", y="Jod", color="Auto_classified", facet_col="TierID",
-                                labels={"Auto_classified": "Klassifikation"})
+            fig_class = px.scatter(df, x="Time", y="Jod", color="Auto_Cluster_Voxel", facet_col="TierID",
+                                labels={"Auto_Cluster_Voxel": "Klassifikation"})
             st.plotly_chart(fig_class, use_container_width=True)
             # 🔼 END BLOCK
 
