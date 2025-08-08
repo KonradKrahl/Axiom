@@ -11,7 +11,7 @@ import os
 import statsmodels.api as sm
 from scipy.cluster.vq import kmeans2  # add this
 from streamlit.components.v1 import html
-
+from pathlib import Path
 
 
 
@@ -43,12 +43,17 @@ main .block-container { padding-left:0 !important; padding-right:0 !important; m
 # -------------------------------
 # Load 3D mouse model from disk
 # -------------------------------
+
+
 def load_mouse_model_base64():
-    model_path = "C:/Users/konra/OneDrive/Desktop/Axiome/voxel_mouse.glb"
-    if os.path.exists(model_path):
-        with open(model_path, "rb") as f:
-            return base64.b64encode(f.read()).decode()
+    # load file that sits next to app.py (works locally AND on Streamlit Cloud)
+    model_path = Path(__file__).with_name("voxel_mouse.glb")
+    if model_path.exists():
+        return base64.b64encode(model_path.read_bytes()).decode()
+    # helpful error so you notice if it’s missing on Cloud
+    st.error(f"voxel_mouse.glb not found at {model_path}")
     return None
+
 
 # -------------------------------
 # Generate HTML for model-viewer
