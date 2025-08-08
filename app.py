@@ -4,12 +4,12 @@ import numpy as np
 import plotly.express as px
 from scipy.signal import butter, filtfilt
 from scipy.stats import f_oneway
+from scipy.cluster.vq import kmeans2
 from statsmodels.tsa.seasonal import seasonal_decompose
 from datetime import datetime, timedelta
 import base64
 import os
 import statsmodels.api as sm
-import sklearn
 from streamlit.components.v1 import html
 
 
@@ -119,27 +119,28 @@ def generate_data():
 def classify_jod_levels(df, n_clusters=3):
     df = df.copy()
     valid = df["Jod"].notna()
-    
-    # Reshape required by KMeans
-    jod_values = df.loc[valid, "Jod"].values.reshape(-1, 1)
-    
-    # Fit KMeans
+    if not valid.any():
+        df["Auto_classified"] = pd.Categorical([])
+        return df
 
-    kmeans = sklearn.cluster.KMeans(n_clusters=n_clusters, n_init=10, random_state=42)
-    clusters = kmeans.fit_predict(jod_values)
+    # kmeans2 expects 2D array
+    jod_values = df.loc[valid, "Jod"].to_numpy().reshape(-1, 1).astype(float)
 
-    # Order clusters by mean Jod
-    means = kmeans.cluster_centers_.flatten()
-    sorted_indices = np.argsort(means)
-    label_map = {sorted_indices[0]: "Low", sorted_indices[1]: "Medium", sorted_indices[2]: "High"}
-    
-    # Apply mapped labels
-    classified = pd.Series(clusters).map(label_map)
-    
-    # Insert into DataFrame
-    df.loc[valid, "Auto_classified"] = classified.values
+    # Run K-Means (SciPy). Returns centers and labels.
+    # init="points" by default; iter=20 is usually fine.
+    centers, labels = kmeans2(jod_values, n_clusters, iter=20, minit="points")
+
+    # Map cluster indices to Low/Medium/High by center means
+    means = centers.flatten()
+    order = np.argsort(means)  # ascending
+    label_map = {order[0]: "Low", order[1]: "Medium", order[2]: "High"} if n_clusters == 3 else {
+        idx: f"Cluster {rank+1}" for rank, idx in enumerate(order)
+    }
+
+    classified = pd.Series(labels).map(label_map).to_numpy()
+
+    df.loc[valid, "Auto_classified"] = classified
     df["Auto_classified"] = df["Auto_classified"].astype("category")
-
     return df
 
 
